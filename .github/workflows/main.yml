@@ -1,0 +1,71 @@
+name: Workflow
+on: push
+permissions:
+  contents: write
+jobs:
+  linter:
+    name: Lint source files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: jetify-com/devbox-install-action@a0d2d53632934ae004f878c840055956d9f741b0 # v0.14.0
+      - run: devbox run lint
+
+  tests_linux:
+    name: Run tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: jetify-com/devbox-install-action@a0d2d53632934ae004f878c840055956d9f741b0 # v0.14.0
+      - run: devbox run test
+
+  build:
+    name: Build executable file
+    needs: [linter, tests_linux]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        GOOS:
+          - linux
+          - darwin
+        GOARCH:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: jetify-com/devbox-install-action@a0d2d53632934ae004f878c840055956d9f741b0 # v0.14.0
+      - run: devbox run build
+        env:
+          GOOS: "${{ matrix.GOOS }}"
+          GOARCH: "${{ matrix.GOARCH }}"
+          OUTPUT: build/azqueuegw-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: azqueuegw-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
+          path: build/azqueuegw-${{ matrix.GOOS }}-${{ matrix.GOARCH }}
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  release:
+    name: Create a release
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: v="$(echo "${{ github.ref }}" | cut -d '/' -f 3)"; grep -q "${v:1}" version.txt || (echo "version.txt does not match with the tagged version"; exit 1)
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          pattern: azqueuegw-*
+          path: artifacts
+          merge-multiple: true
+      - uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        with:
+          pattern: install-scripts
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*
